@@ -41,7 +41,11 @@ const DOCKS = [
 // Pares que precisam cair na mesma equipe pelo menos 1x por semana
 const FORCED_PAIRS = ["Sthefany", "Evelyn", "Roberto", "Marilene"]; // sempre pareados com "Ana"
 const SAVE_PASSWORD = "leoleo";
-const MAX_DOCAS_POR_CONFERENTE = 3; // um conferente pode assumir até 3 docas (caminhões)
+
+// Referência informativa: o ideal é cada conferente ficar com pelo menos 2 docas.
+// Isso NÃO limita mais quantos conferentes a pessoa pode escolher — é só usado para
+// gerar um aviso quando a escolha feita deixar alguém com menos docas que o ideal.
+const MIN_DOCAS_POR_CONFERENTE = 2;
 
 function slug(prefix, name){
   return prefix + '-' + name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-');
@@ -103,14 +107,17 @@ setupExclusivity();
 
 const qtdConferentesInput = document.getElementById('qtd-conferentes-input');
 let qtdConferentesTocadoPeloUsuario = false;
+
+// O limite agora é só o total de conferentes marcados no checklist — a pessoa escolhe
+// livremente quantos deles vão atuar hoje (1, 4, 5, todos... o que ela quiser).
 function syncQtdConferentes(){
   const checkedCount = getChecked(confListEl).length || 1;
   qtdConferentesInput.max = checkedCount;
   if(!qtdConferentesTocadoPeloUsuario){
-    // ainda não foi editado à mão: sempre acompanha o total de conferentes marcados
+    // ainda não foi editado à mão: acompanha o total de conferentes marcados
     qtdConferentesInput.value = checkedCount;
   } else if(Number(qtdConferentesInput.value) > checkedCount){
-    // foi editado, mas ficou maior que o total marcado agora: reduz para caber
+    // foi editado, mas ficou maior que o total marcado agora: reduz só pra caber no checklist
     qtdConferentesInput.value = checkedCount;
   }
 }
@@ -217,49 +224,31 @@ async function gerarEscala(){
   const bons = shuffle(cargPresentes.filter(p=>p.quality==='bom'));
   const ruins = shuffle(cargPresentes.filter(p=>p.quality==='ruim'));
 
-  // Respeita quantos conferentes o usuário quer ativos hoje (os que sobrarem ficam de fora da escala)
+  // A quantidade de conferentes que vai atuar hoje é escolha da pessoa (campo "Conferentes
+  // hoje"). O único limite é o total de conferentes marcados como presentes no checklist —
+  // esse checklist já é a validação da quantidade disponível. Não existe mais corte automático
+  // baseado em "2 docas por conferente".
   let qtdConferentes = parseInt(qtdConferentesInput.value, 10);
   if(!Number.isFinite(qtdConferentes) || qtdConferentes < 1) qtdConferentes = confPresentes.length;
   qtdConferentes = Math.min(qtdConferentes, confPresentes.length);
   const confAtivos = confPresentes.slice(0, qtdConferentes);
 
-  // Primeiro decide quem cobre qual doca, na ordem de prioridade (volume mais alto primeiro).
-  // Cada conferente pode assumir até MAX_DOCAS_POR_CONFERENTE docas antes de passar para o próximo.
-  // Em seguida agrupa por conferente: ele forma UMA equipe só, que leva a ele em todas as docas dele
-  // (o time não se divide nem se mistura entre as docas do mesmo conferente).
-  let ci = 0, docasDoAtual = 0;
-  const teams = [];
-  const groupIndexByName = {};
-  DOCKS.forEach(d=>{
-    let conferente = null;
-    if(ci < confAtivos.length){
-      conferente = confAtivos[ci];
-      docasDoAtual++;
-      if(docasDoAtual >= MAX_DOCAS_POR_CONFERENTE){ ci++; docasDoAtual = 0; }
-    }
-    if(!conferente){
-      teams.push({ docas:[d.code], volumes:[d.volume], loaders:d.loaders, minBons:d.minBons||0, conferente:null, carregadores:[] });
-      return;
-    }
-    const name = conferente.name;
-    if(!(name in groupIndexByName)){
-      groupIndexByName[name] = teams.length;
-      teams.push({ docas:[d.code], volumes:[d.volume], loaders:d.loaders, minBons:d.minBons||0, conferente, carregadores:[] });
-    } else {
-      // mesma equipe do conferente cobre também esta doca — não abre time novo,
-      // só aumenta a exigência do time se esta doca pedir mais gente/reforço
-      const g = teams[groupIndexByName[name]];
-      g.docas.push(d.code);
-      g.volumes.push(d.volume);
-      g.loaders = Math.max(g.loaders, d.loaders);
-      g.minBons = Math.max(g.minBons, d.minBons||0);
-    }
+  // Distribui as docas em rodízio (round-robin) entre os conferentes ativos, seguindo a ordem
+  // de prioridade (volume mais alto primeiro). Isso intercala doca de volume alto com volume
+  // baixo entre as pessoas. Se a pessoa escolher mais conferentes do que docas existem, os
+  // conferentes excedentes entram na equipe sem doca própria (ficam de reforço/folga) — é uma
+  // escolha da pessoa e a tabela reflete isso normalmente, sem travar a geração.
+  const teams = confAtivos.map(conferente => ({ docas:[], volumes:[], loaders:0, minBons:0, conferente, carregadores:[] }));
+  DOCKS.forEach((d, i)=>{
+    const team = teams[i % teams.length];
+    team.docas.push(d.code);
+    team.volumes.push(d.volume);
+    team.loaders = Math.max(team.loaders, d.loaders);
+    team.minBons = Math.max(team.minBons, d.minBons||0);
   });
 
   let bi=0, ri=0;
   teams.forEach(team=>{
-    if(!team.conferente) return; // doca sem conferente hoje, não recebe carregadores
-
     // garante primeiro o mínimo de carregadores bons exigido pelo grupo (ex: quem cobre a SSP15)
     let bonsGiven = 0;
     while(bonsGiven < team.minBons && bi < bons.length && team.carregadores.length < team.loaders){
@@ -276,11 +265,11 @@ async function gerarEscala(){
     }
   });
 
-  // sobras vão para as equipes ativas, por ordem de prioridade
-  const docasAtivas = teams.filter(t=>t.conferente);
+  // sobras vão para as equipes ativas que têm doca, por ordem de prioridade
+  const teamsComDoca = teams.filter(t=>t.docas.length > 0);
   let ti = 0, guard = 0;
-  while((bi<bons.length || ri<ruins.length) && guard < 2000 && docasAtivas.length){
-    const team = docasAtivas[ti % docasAtivas.length];
+  while((bi<bons.length || ri<ruins.length) && guard < 2000 && teamsComDoca.length){
+    const team = teamsComDoca[ti % teamsComDoca.length];
     if(bi<bons.length) team.carregadores.push(bons[bi++]);
     else if(ri<ruins.length) team.carregadores.push(ruins[ri++]);
     ti++; guard++;
@@ -291,7 +280,6 @@ async function gerarEscala(){
   const dateKey = dateStr(today);
   const weekKey = isoWeekKey(today);
   const anaPresent = cargPresentes.some(p=>p.name==='Ana');
-  let pairWarning = '';
 
   if(anaPresent){
     const presentNames = new Set([...confPresentes.map(p=>p.name), ...cargPresentes.map(p=>p.name)]);
@@ -308,16 +296,24 @@ async function gerarEscala(){
     }
   }
 
-  // avisos
+  // avisos (informativos — nunca bloqueiam a geração da escala)
   const warnings = [];
-  const semConferente = teams.filter(t=>!t.conferente);
-  if(semConferente.length){ warnings.push(`Sem conferente hoje: ${semConferente.map(t=>t.docas.join('/')).join(', ')}.`); }
 
-  const semCarregadores = teams.filter(t=>t.conferente && t.carregadores.length < t.loaders);
-  if(semCarregadores.length){ warnings.push(`Carregadores insuficientes em: ${semCarregadores.map(t=>t.docas.join('/')).join(', ')}.`); }
+  const semDoca = teams.filter(t=>t.docas.length === 0);
+  if(semDoca.length){
+    warnings.push(`${semDoca.length} conferente(s) ficaram sem doca própria hoje (mais conferentes do que docas): ${semDoca.map(t=>t.conferente.name).join(', ')}.`);
+  }
+
+  const abaixoDoIdeal = teams.filter(t=>t.docas.length > 0 && t.docas.length < MIN_DOCAS_POR_CONFERENTE);
+  if(abaixoDoIdeal.length){
+    warnings.push(`Ideal é ${MIN_DOCAS_POR_CONFERENTE}+ docas por conferente — ficaram abaixo disso: ${abaixoDoIdeal.map(t=>t.conferente.name).join(', ')}.`);
+  }
+
+  const semCarregadores = teams.filter(t=>t.carregadores.length < t.loaders);
+  if(semCarregadores.length){ warnings.push(`Carregadores insuficientes em: ${semCarregadores.map(t=>t.docas.join('/')||t.conferente.name).join(', ')}.`); }
 
   const ssp15 = teams.find(t=>t.docas.includes('SSP15'));
-  if(ssp15 && ssp15.conferente){
+  if(ssp15){
     const bonsCount = ssp15.carregadores.filter(c=>c.quality==='bom').length;
     if(bonsCount < ssp15.minBons){ warnings.push(`SSP15 ficou com apenas ${bonsCount} carregador(es) reforçado(s) — precisa de pelo menos ${ssp15.minBons}.`); }
   }
@@ -333,9 +329,9 @@ function renderTable(teams, meta){
   const wrap = document.getElementById('teams-table-wrap');
   const rows = teams.map(t=>{
     const conf = t.conferente ? t.conferente.name : '—';
-    const docaCell = t.docas.join('/');
-    const volumeCell = [...new Set(t.volumes)].join(' / ');
-    const carg = t.carregadores.length ? t.carregadores.map(c=>c.name).join(', ') : (t.conferente ? '—' : '');
+    const docaCell = t.docas.length ? t.docas.join('/') : '—';
+    const volumeCell = t.volumes.length ? [...new Set(t.volumes)].join(' / ') : '—';
+    const carg = t.carregadores.length ? t.carregadores.map(c=>c.name).join(', ') : '—';
     return `<tr><td class="col-doca">${docaCell}</td><td>${volumeCell}</td><td class="col-conf">${conf}</td><td class="col-carg">${carg}</td></tr>`;
   }).join('');
 
