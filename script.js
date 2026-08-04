@@ -1,0 +1,424 @@
+const CONFERENTES = [
+  {name:"Sthefany", quality:"bom"},
+  {name:"Jose", quality:"bom"},
+  {name:"Gabriel Proença", quality:"bom"},
+  {name:"Higor", quality:"bom"},
+  {name:"Marilene", quality:"ruim"},
+  {name:"Fabio", quality:"bom"},
+  {name:"Gabriel Morais", quality:"bom"},
+];
+
+const CARREGADORES = [
+  {name:"Jose", quality:"bom"},
+  {name:"Gabriel Proença", quality:"bom"},
+  {name:"Higor", quality:"bom"},
+  {name:"Fabio", quality:"bom"},
+  {name:"Gabriel Morais", quality:"bom"},
+  {name:"Bruna", quality:"bom"},
+  {name:"Rafael", quality:"bom"},
+  {name:"Keny", quality:"bom"},
+  {name:"Douglas", quality:"ruim"},
+  {name:"Dheymes", quality:"ruim"},
+  {name:"Ana", quality:"ruim"},
+  {name:"Roberto", quality:"ruim"},
+  {name:"Evelyn", quality:"ruim"},
+  {name:"Ketelyn", quality:"ruim"},
+  {name:"Marilene", quality:"ruim"},
+];
+
+// Docas atendidas, em ordem de prioridade (volume mais alto primeiro).
+// "loaders" = quantos carregadores a doca precisa. "minBons" = mínimo de carregadores bons obrigatório.
+const DOCKS = [
+  { code:"SSP15", volume:"Alto",        loaders:3, minBons:2 },
+  { code:"SSP46", volume:"Alto",        loaders:3 },
+  { code:"SSP20", volume:"Alto",        loaders:3 },
+  { code:"SSP38", volume:"Médio",       loaders:2 },
+  { code:"SSP17", volume:"Razoável",    loaders:2 },
+  { code:"SSP48", volume:"Baixo",       loaders:1 },
+  { code:"SSP51", volume:"Muito baixo", loaders:1 },
+];
+
+// Pares que precisam cair na mesma equipe pelo menos 1x por semana
+const FORCED_PAIRS = ["Sthefany", "Evelyn", "Roberto", "Marilene"]; // sempre pareados com "Ana"
+const SAVE_PASSWORD = "leoleo";
+const MAX_DOCAS_POR_CONFERENTE = 3; // um conferente pode assumir até 3 docas (caminhões)
+
+function slug(prefix, name){
+  return prefix + '-' + name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-');
+}
+
+function renderRoster(listEl, people, prefix){
+  listEl.innerHTML = '';
+  [...people].sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{
+    const id = slug(prefix, p.name);
+    const li = document.createElement('li');
+    li.className = 'roster-item';
+    li.innerHTML = `
+      <input type="checkbox" id="${id}" checked data-name="${p.name}" data-quality="${p.quality}">
+      <label for="${id}">${p.name}</label>
+    `;
+    listEl.appendChild(li);
+  });
+}
+
+const confListEl = document.getElementById('conf-list');
+const cargListEl = document.getElementById('carg-list');
+renderRoster(confListEl, CONFERENTES, 'conf');
+renderRoster(cargListEl, CARREGADORES, 'carg');
+
+document.getElementById('marcar-todos').addEventListener('click', ()=>{
+  document.querySelectorAll('#conf-list input[type=checkbox]').forEach(cb=>{ cb.checked = true; cb.dispatchEvent(new Event('change')); });
+  document.querySelectorAll('#carg-list input[type=checkbox]').forEach(cb=>{
+    if(!cb.disabled){ cb.checked = true; cb.dispatchEvent(new Event('change')); }
+  });
+});
+document.getElementById('desmarcar-todos').addEventListener('click', ()=>{
+  document.querySelectorAll('.roster-list input[type=checkbox]').forEach(cb=>{ cb.checked = false; cb.dispatchEvent(new Event('change')); });
+});
+
+// Impede marcar a mesma pessoa como conferente e carregadora ao mesmo tempo
+function setupExclusivity(){
+  const byName = {};
+  document.querySelectorAll('#conf-list input[type=checkbox]').forEach(cb=>{ byName[cb.dataset.name] = byName[cb.dataset.name] || {}; byName[cb.dataset.name].conf = cb; });
+  document.querySelectorAll('#carg-list input[type=checkbox]').forEach(cb=>{ byName[cb.dataset.name] = byName[cb.dataset.name] || {}; byName[cb.dataset.name].carg = cb; });
+
+  Object.values(byName).forEach(pair=>{
+    if(!pair.conf || !pair.carg) return;
+    const li_conf = pair.conf.closest('.roster-item');
+    const li_carg = pair.carg.closest('.roster-item');
+
+    pair.conf.addEventListener('change', ()=>{
+      if(pair.conf.checked){ pair.carg.checked = false; pair.carg.disabled = true; li_carg.style.opacity = '.4'; }
+      else { pair.carg.disabled = false; li_carg.style.opacity = '1'; }
+    });
+    pair.carg.addEventListener('change', ()=>{
+      if(pair.carg.checked){ pair.conf.checked = false; pair.conf.disabled = true; li_conf.style.opacity = '.4'; }
+      else { pair.conf.disabled = false; li_conf.style.opacity = '1'; }
+    });
+
+    if(pair.conf.checked){ pair.carg.checked = false; pair.carg.disabled = true; li_carg.style.opacity = '.4'; }
+  });
+}
+setupExclusivity();
+
+function getChecked(listEl){
+  return [...listEl.querySelectorAll('input[type=checkbox]:checked')].map(cb=>({ name: cb.dataset.name, quality: cb.dataset.quality }));
+}
+
+function shuffle(arr){
+  const a = [...arr];
+  for(let i=a.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]] = [a[j],a[i]]; }
+  return a;
+}
+
+function dateStr(d){ return d.toISOString().slice(0,10); }
+function pairKey(a,b){ return [a,b].sort().join('__'); }
+
+function isoWeekKey(date){
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = (d.getUTCDay()+6)%7;
+  d.setUTCDate(d.getUTCDate()-dayNum+3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(),0,4));
+  const week = 1 + Math.round(((d - firstThursday)/86400000 - 3 + ((firstThursday.getUTCDay()+6)%7))/7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2,'0')}`;
+}
+
+function daysBetween(d1,d2){ return Math.round((d2-d1)/86400000); }
+
+function formatDateShort(iso){ const [y,m,d]=iso.split('-'); return `${d}/${m}`; }
+function formatDatePt(iso){
+  const dt = new Date(iso+'T00:00:00');
+  return dt.toLocaleDateString('pt-BR', { weekday:'short', day:'2-digit', month:'2-digit', year:'numeric' });
+}
+
+async function getPairHistory(){
+  try{
+    const res = await window.storage.get('pair-history', true);
+    return res ? JSON.parse(res.value) : {};
+  }catch(e){ return {}; }
+}
+async function savePairHistory(hist){
+  try{ await window.storage.set('pair-history', JSON.stringify(hist), true); }catch(e){ console.error(e); }
+}
+
+function decideForcedPair(history, key, today){
+  const entry = history[key] || {};
+  const weekKey = isoWeekKey(today);
+  const metThisWeek = !!(entry.weeksMet && entry.weeksMet[weekKey]);
+  if(metThisWeek) return { force:false, urgency:-1 };
+  const last = entry.lastDate ? new Date(entry.lastDate+'T00:00:00') : null;
+  const daysSince = last ? daysBetween(last, today) : 999;
+  const dow = today.getDay();
+  const mondayIndex = (dow+6)%7; // segunda=0 ... domingo=6
+  const isLastChance = mondayIndex === 6; // domingo, último dia da semana
+  const randomTrigger = Math.random() < 0.35;
+  const force = isLastChance || daysSince >= 5 || randomTrigger;
+  const urgency = (isLastChance ? 1000 : 0) + daysSince;
+  return { force, urgency };
+}
+
+function findTeamIndexOf(teams, name){
+  for(let i=0;i<teams.length;i++){
+    const t = teams[i];
+    if(t.conferente && t.conferente.name===name) return i;
+    if(t.carregadores.some(c=>c.name===name)) return i;
+  }
+  return -1;
+}
+
+function forcePairing(teams, partnerName, movName){
+  const idxPartner = findTeamIndexOf(teams, partnerName);
+  const idxMov = findTeamIndexOf(teams, movName);
+  if(idxPartner===-1 || idxMov===-1 || idxPartner===idxMov) return;
+  const teamMov = teams[idxMov];
+  const teamPartner = teams[idxPartner];
+  const pos = teamMov.carregadores.findIndex(c=>c.name===movName);
+  if(pos===-1) return;
+  const [moved] = teamMov.carregadores.splice(pos,1);
+  teamPartner.carregadores.push(moved);
+}
+
+async function gerarEscala(){
+  const msg = document.getElementById('msg');
+  msg.textContent = '';
+  document.getElementById('save-msg').textContent = '';
+
+  const confPresentes = shuffle(getChecked(confListEl));
+  const cargPresentes = getChecked(cargListEl);
+
+  if(confPresentes.length === 0){ msg.style.color='var(--red)'; msg.textContent = 'Selecione ao menos um conferente presente.'; return; }
+  if(cargPresentes.length === 0){ msg.style.color='var(--red)'; msg.textContent = 'Selecione ao menos um carregador presente.'; return; }
+
+  const bons = shuffle(cargPresentes.filter(p=>p.quality==='bom'));
+  const ruins = shuffle(cargPresentes.filter(p=>p.quality==='ruim'));
+
+  // Uma equipe por doca, já na ordem de prioridade (volume mais alto primeiro)
+  const teams = DOCKS.map(d=>({ doca:d.code, volume:d.volume, loaders:d.loaders, minBons:d.minBons||0, conferente:null, carregadores:[] }));
+
+  // Conferentes disponíveis cobrem as docas de maior prioridade primeiro.
+  // Cada conferente pode assumir até MAX_DOCAS_POR_CONFERENTE docas antes de passar para o próximo.
+  let ci = 0, docasDoAtual = 0;
+  teams.forEach(team=>{
+    if(ci < confPresentes.length){
+      team.conferente = confPresentes[ci];
+      docasDoAtual++;
+      if(docasDoAtual >= MAX_DOCAS_POR_CONFERENTE){ ci++; docasDoAtual = 0; }
+    }
+  });
+
+  let bi=0, ri=0;
+  teams.forEach(team=>{
+    if(!team.conferente) return; // doca sem conferente hoje, não recebe carregadores
+
+    // garante primeiro o mínimo de carregadores bons exigido pela doca (ex: SSP15)
+    let bonsGiven = 0;
+    while(bonsGiven < team.minBons && bi < bons.length && team.carregadores.length < team.loaders){
+      team.carregadores.push(bons[bi++]); bonsGiven++;
+    }
+    // completa o restante das vagas, alternando bom/ruim
+    while(team.carregadores.length < team.loaders){
+      const preferBom = team.carregadores.length % 2 === 0;
+      let pick = null;
+      if(preferBom){ if(bi<bons.length) pick = bons[bi++]; else if(ri<ruins.length) pick = ruins[ri++]; }
+      else { if(ri<ruins.length) pick = ruins[ri++]; else if(bi<bons.length) pick = bons[bi++]; }
+      if(!pick) break;
+      team.carregadores.push(pick);
+    }
+  });
+
+  // sobras vão para as docas ativas, por ordem de prioridade
+  const docasAtivas = teams.filter(t=>t.conferente);
+  let ti = 0, guard = 0;
+  while((bi<bons.length || ri<ruins.length) && guard < 2000 && docasAtivas.length){
+    const team = docasAtivas[ti % docasAtivas.length];
+    if(bi<bons.length) team.carregadores.push(bons[bi++]);
+    else if(ri<ruins.length) team.carregadores.push(ruins[ri++]);
+    ti++; guard++;
+  }
+
+  // Pares obrigatórios (envolvendo Ana)
+  const today = new Date();
+  const dateKey = dateStr(today);
+  const weekKey = isoWeekKey(today);
+  const anaPresent = cargPresentes.some(p=>p.name==='Ana');
+  let pairWarning = '';
+
+  if(anaPresent){
+    const presentNames = new Set([...confPresentes.map(p=>p.name), ...cargPresentes.map(p=>p.name)]);
+    const history = await getPairHistory();
+    const candidates = [];
+    FORCED_PAIRS.forEach(partner=>{
+      if(!presentNames.has(partner)) return;
+      const { force, urgency } = decideForcedPair(history, pairKey(partner,'Ana'), today);
+      if(force) candidates.push({ partner, urgency });
+    });
+    if(candidates.length){
+      candidates.sort((a,b)=>b.urgency-a.urgency);
+      forcePairing(teams, candidates[0].partner, 'Ana');
+    }
+  }
+
+  // avisos
+  const warnings = [];
+  const semConferente = teams.filter(t=>!t.conferente);
+  if(semConferente.length){ warnings.push(`Sem conferente hoje: ${semConferente.map(t=>t.doca).join(', ')}.`); }
+
+  const semCarregadores = teams.filter(t=>t.conferente && t.carregadores.length < t.loaders);
+  if(semCarregadores.length){ warnings.push(`Carregadores insuficientes em: ${semCarregadores.map(t=>t.doca).join(', ')}.`); }
+
+  const ssp15 = teams.find(t=>t.doca==='SSP15');
+  if(ssp15 && ssp15.conferente){
+    const bonsCount = ssp15.carregadores.filter(c=>c.quality==='bom').length;
+    if(bonsCount < ssp15.minBons){ warnings.push(`SSP15 ficou com apenas ${bonsCount} carregador(es) reforçado(s) — precisa de pelo menos ${ssp15.minBons}.`); }
+  }
+
+  msg.style.color = 'var(--red)';
+  msg.textContent = warnings.join(' ');
+
+  window.__draft = { teams, dateKey, weekKey };
+  renderTable(teams, { saved:false, date: dateKey });
+}
+
+function renderTable(teams, meta){
+  const wrap = document.getElementById('teams-table-wrap');
+  const rows = teams.map(t=>{
+    const conf = t.conferente ? t.conferente.name : '—';
+    const carg = t.carregadores.length ? t.carregadores.map(c=>c.name).join(', ') : (t.conferente ? '—' : '');
+    return `<tr><td class="col-doca">${t.doca}</td><td>${t.volume}</td><td class="col-conf">${conf}</td><td class="col-carg">${carg}</td></tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <table class="teams-table">
+      <thead>
+        <tr><th colspan="4">PLANEJAMENTO DT. ${formatDateShort(meta.date)}</th></tr>
+        <tr><th colspan="4">EQUIPE POR DOCA</th></tr>
+        <tr><th>DOCA</th><th>VOLUME</th><th>CONFERENTE</th><th>CARREGADORES</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="4">STAGE ZONE = Maria Lucia - Yanetxhi - Gracy</td></tr>
+      </tfoot>
+    </table>
+  `;
+
+  const tag = document.getElementById('status-tag');
+  if(meta.saved){ tag.className = 'status-tag saved'; tag.textContent = `Escala oficial · salva em ${formatDatePt(meta.date)}`; }
+  else { tag.className = 'status-tag draft'; tag.textContent = `Rascunho · ${formatDatePt(meta.date)} · ainda não salva`; }
+
+  document.getElementById('output-section').style.display = 'block';
+  document.getElementById('print-btn').style.display = 'inline-block';
+  document.getElementById('output-section').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+document.getElementById('gerar-btn').addEventListener('click', gerarEscala);
+document.getElementById('print-btn').addEventListener('click', ()=>window.print());
+
+document.getElementById('save-btn').addEventListener('click', ()=>{
+  document.getElementById('pass-panel').style.display = 'flex';
+  document.getElementById('pass-input').focus();
+});
+document.getElementById('pass-cancel').addEventListener('click', ()=>{
+  document.getElementById('pass-panel').style.display = 'none';
+  document.getElementById('pass-input').value = '';
+});
+document.getElementById('pass-input').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmSave(); });
+document.getElementById('pass-confirm').addEventListener('click', confirmSave);
+
+async function confirmSave(){
+  const val = document.getElementById('pass-input').value;
+  const saveMsg = document.getElementById('save-msg');
+  if(val !== SAVE_PASSWORD){ saveMsg.style.color = 'var(--red)'; saveMsg.textContent = 'Senha incorreta.'; return; }
+  if(!window.__draft){ saveMsg.style.color = 'var(--red)'; saveMsg.textContent = 'Gere uma escala antes de salvar.'; return; }
+
+  saveMsg.style.color = 'var(--muted)';
+  saveMsg.textContent = 'Salvando...';
+
+  try{
+    const { teams, dateKey, weekKey } = window.__draft;
+    const payload = {
+      date: dateKey,
+      savedAt: new Date().toISOString(),
+      teams: teams.map(t=>({
+        doca: t.doca,
+        volume: t.volume,
+        conferente: t.conferente ? t.conferente.name : null,
+        carregadores: t.carregadores.map(c=>c.name)
+      }))
+    };
+    await window.storage.set('escala:'+dateKey, JSON.stringify(payload), true);
+
+    const hist = await getPairHistory();
+    FORCED_PAIRS.forEach(partner=>{
+      const key = pairKey(partner, 'Ana');
+      const together = teams.some(t=>{
+        const names = [t.conferente ? t.conferente.name : null, ...t.carregadores.map(c=>c.name)];
+        return names.includes(partner) && names.includes('Ana');
+      });
+      if(together){
+        hist[key] = hist[key] || {};
+        hist[key].lastDate = dateKey;
+        hist[key].weeksMet = hist[key].weeksMet || {};
+        hist[key].weeksMet[weekKey] = true;
+      }
+    });
+    await savePairHistory(hist);
+
+    saveMsg.style.color = 'var(--green)';
+    saveMsg.textContent = 'Escala salva! Todos já podem visualizar.';
+    document.getElementById('pass-panel').style.display = 'none';
+    document.getElementById('pass-input').value = '';
+    renderTable(teams, { saved:true, date:dateKey });
+    refreshSavedList();
+  }catch(e){
+    saveMsg.style.color = 'var(--red)';
+    saveMsg.textContent = 'Erro ao salvar. Tente novamente.';
+  }
+}
+
+function payloadToTeams(data){
+  return data.teams.map(t=>({
+    doca: t.doca,
+    volume: t.volume,
+    conferente: t.conferente ? { name:t.conferente } : null,
+    carregadores: (t.carregadores || []).map(n=>({ name:n }))
+  }));
+}
+
+async function refreshSavedList(){
+  const sel = document.getElementById('saved-select');
+  sel.innerHTML = '<option value="">Selecione uma data</option>';
+  try{
+    const res = await window.storage.list('escala:', true);
+    const keys = (res && res.keys) ? res.keys : [];
+    keys.sort().reverse().forEach(k=>{
+      const d = k.replace('escala:','');
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = formatDatePt(d);
+      sel.appendChild(opt);
+    });
+  }catch(e){ /* sem escalas salvas ainda */ }
+}
+
+document.getElementById('ver-salva-btn').addEventListener('click', async ()=>{
+  const key = document.getElementById('saved-select').value;
+  if(!key) return;
+  try{
+    const res = await window.storage.get(key, true);
+    if(!res) return;
+    const data = JSON.parse(res.value);
+    renderTable(payloadToTeams(data), { saved:true, date:data.date });
+  }catch(e){ /* ignora */ }
+});
+
+(async function init(){
+  const todayKey = 'escala:' + dateStr(new Date());
+  try{
+    const res = await window.storage.get(todayKey, true);
+    if(res){
+      const data = JSON.parse(res.value);
+      renderTable(payloadToTeams(data), { saved:true, date:data.date });
+    }
+  }catch(e){ /* nenhuma escala salva hoje ainda */ }
+  refreshSavedList();
+})();
