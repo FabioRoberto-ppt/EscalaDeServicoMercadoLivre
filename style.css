@@ -48,7 +48,7 @@ header {
 }
 
 .logo {
-  height: 110px; /* Aumentado */
+  height: 110px;
   width: auto;
   flex-shrink: 0;
   object-fit: contain;
@@ -72,7 +72,7 @@ h1 {
   font-family: var(--font-display);
   font-weight: 700;
   text-transform: uppercase;
-  font-size: clamp(32px, 6vw, 48px);
+  font-size: clamp(28px, 8vw, 48px);
   margin: 4px 0;
   color: var(--text);
   line-height: 1.1;
@@ -125,12 +125,6 @@ main {
   gap: 24px;
 }
 
-@media (max-width: 640px) {
-  .roster-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .roster-list {
   list-style: none;
   margin: 0;
@@ -159,6 +153,7 @@ main {
   height: 18px;
   accent-color: var(--accent);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .roster-item label {
@@ -203,6 +198,7 @@ select {
   padding: 10px 12px;
   border-radius: 6px;
   outline: none;
+  width: 100%;
 }
 
 .field input[type='number']:focus,
@@ -227,6 +223,7 @@ select:focus {
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
   box-shadow: 0 2px 4px rgba(41, 112, 255, 0.2);
+  white-space: nowrap;
 }
 
 .btn-stamp:hover {
@@ -248,6 +245,7 @@ select:focus {
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .btn-ghost:hover {
@@ -305,12 +303,14 @@ select:focus {
   margin-top: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 table.teams-table {
   width: 100%;
+  min-width: 480px;
   border-collapse: collapse;
   font-size: 14px;
 }
@@ -344,6 +344,7 @@ table.teams-table td.col-conf {
   font-weight: 600;
   text-align: left;
   font-size: 15px;
+  white-space: nowrap;
 }
 
 table.teams-table td.col-doca {
@@ -373,6 +374,86 @@ footer {
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
+}
+
+/* ===== Mobile ===== */
+@media (max-width: 640px) {
+  .roster-grid {
+    grid-template-columns: 1fr;
+  }
+
+  header {
+    padding: 24px 16px 16px;
+    gap: 14px;
+  }
+
+  .logo {
+    height: 56px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+  }
+
+  .sub {
+    font-size: 13.5px;
+  }
+
+  main {
+    padding: 0 14px 50px;
+  }
+
+  .panel {
+    padding: 16px;
+    margin-top: 14px;
+  }
+
+  .panel h2 {
+    font-size: 17px;
+  }
+
+  .controls {
+    gap: 10px;
+  }
+
+  .controls .btn-stamp,
+  .controls .btn-ghost {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .field {
+    width: 100%;
+  }
+
+  #pass-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #pass-panel input,
+  #pass-panel button {
+    width: 100%;
+  }
+
+  table.teams-table {
+    font-size: 12.5px;
+  }
+
+  table.teams-table th,
+  table.teams-table td {
+    padding: 8px 6px;
+  }
+}
+
+@media (max-width: 400px) {
+  .logo {
+    height: 44px;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
 }
 
 /* Regras de Impressão */
