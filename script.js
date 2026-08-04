@@ -67,13 +67,13 @@ renderRoster(confListEl, CONFERENTES, 'conf');
 renderRoster(cargListEl, CARREGADORES, 'carg');
 
 document.getElementById('marcar-todos').addEventListener('click', ()=>{
-  document.querySelectorAll('#conf-list input[type=checkbox]').forEach(cb=>{ cb.checked = true; cb.dispatchEvent(new Event('change')); });
+  document.querySelectorAll('#conf-list input[type=checkbox]').forEach(cb=>{ cb.checked = true; cb.dispatchEvent(new Event('change', {bubbles:true})); });
   document.querySelectorAll('#carg-list input[type=checkbox]').forEach(cb=>{
-    if(!cb.disabled){ cb.checked = true; cb.dispatchEvent(new Event('change')); }
+    if(!cb.disabled){ cb.checked = true; cb.dispatchEvent(new Event('change', {bubbles:true})); }
   });
 });
 document.getElementById('desmarcar-todos').addEventListener('click', ()=>{
-  document.querySelectorAll('.roster-list input[type=checkbox]').forEach(cb=>{ cb.checked = false; cb.dispatchEvent(new Event('change')); });
+  document.querySelectorAll('.roster-list input[type=checkbox]').forEach(cb=>{ cb.checked = false; cb.dispatchEvent(new Event('change', {bubbles:true})); });
 });
 
 // Impede marcar a mesma pessoa como conferente e carregadora ao mesmo tempo
@@ -100,6 +100,31 @@ function setupExclusivity(){
   });
 }
 setupExclusivity();
+
+const qtdConferentesInput = document.getElementById('qtd-conferentes-input');
+let qtdConferentesTocadoPeloUsuario = false;
+function syncQtdConferentes(){
+  const checkedCount = getChecked(confListEl).length || 1;
+  qtdConferentesInput.max = checkedCount;
+  if(!qtdConferentesTocadoPeloUsuario){
+    // ainda não foi editado à mão: sempre acompanha o total de conferentes marcados
+    qtdConferentesInput.value = checkedCount;
+  } else if(Number(qtdConferentesInput.value) > checkedCount){
+    // foi editado, mas ficou maior que o total marcado agora: reduz para caber
+    qtdConferentesInput.value = checkedCount;
+  }
+}
+confListEl.addEventListener('change', syncQtdConferentes);
+qtdConferentesInput.addEventListener('input', ()=>{ qtdConferentesTocadoPeloUsuario = true; });
+qtdConferentesInput.addEventListener('change', ()=>{
+  qtdConferentesTocadoPeloUsuario = true;
+  let v = parseInt(qtdConferentesInput.value, 10);
+  const max = Number(qtdConferentesInput.max) || 1;
+  if(!Number.isFinite(v) || v < 1) v = 1;
+  if(v > max) v = max;
+  qtdConferentesInput.value = v;
+});
+syncQtdConferentes();
 
 function getChecked(listEl){
   return [...listEl.querySelectorAll('input[type=checkbox]:checked')].map(cb=>({ name: cb.dataset.name, quality: cb.dataset.quality }));
@@ -192,17 +217,42 @@ async function gerarEscala(){
   const bons = shuffle(cargPresentes.filter(p=>p.quality==='bom'));
   const ruins = shuffle(cargPresentes.filter(p=>p.quality==='ruim'));
 
-  // Uma equipe por doca, já na ordem de prioridade (volume mais alto primeiro)
-  const teams = DOCKS.map(d=>({ doca:d.code, volume:d.volume, loaders:d.loaders, minBons:d.minBons||0, conferente:null, carregadores:[] }));
+  // Respeita quantos conferentes o usuário quer ativos hoje (os que sobrarem ficam de fora da escala)
+  let qtdConferentes = parseInt(qtdConferentesInput.value, 10);
+  if(!Number.isFinite(qtdConferentes) || qtdConferentes < 1) qtdConferentes = confPresentes.length;
+  qtdConferentes = Math.min(qtdConferentes, confPresentes.length);
+  const confAtivos = confPresentes.slice(0, qtdConferentes);
 
-  // Conferentes disponíveis cobrem as docas de maior prioridade primeiro.
+  // Primeiro decide quem cobre qual doca, na ordem de prioridade (volume mais alto primeiro).
   // Cada conferente pode assumir até MAX_DOCAS_POR_CONFERENTE docas antes de passar para o próximo.
+  // Em seguida agrupa por conferente: ele forma UMA equipe só, que leva a ele em todas as docas dele
+  // (o time não se divide nem se mistura entre as docas do mesmo conferente).
   let ci = 0, docasDoAtual = 0;
-  teams.forEach(team=>{
-    if(ci < confPresentes.length){
-      team.conferente = confPresentes[ci];
+  const teams = [];
+  const groupIndexByName = {};
+  DOCKS.forEach(d=>{
+    let conferente = null;
+    if(ci < confAtivos.length){
+      conferente = confAtivos[ci];
       docasDoAtual++;
       if(docasDoAtual >= MAX_DOCAS_POR_CONFERENTE){ ci++; docasDoAtual = 0; }
+    }
+    if(!conferente){
+      teams.push({ docas:[d.code], volumes:[d.volume], loaders:d.loaders, minBons:d.minBons||0, conferente:null, carregadores:[] });
+      return;
+    }
+    const name = conferente.name;
+    if(!(name in groupIndexByName)){
+      groupIndexByName[name] = teams.length;
+      teams.push({ docas:[d.code], volumes:[d.volume], loaders:d.loaders, minBons:d.minBons||0, conferente, carregadores:[] });
+    } else {
+      // mesma equipe do conferente cobre também esta doca — não abre time novo,
+      // só aumenta a exigência do time se esta doca pedir mais gente/reforço
+      const g = teams[groupIndexByName[name]];
+      g.docas.push(d.code);
+      g.volumes.push(d.volume);
+      g.loaders = Math.max(g.loaders, d.loaders);
+      g.minBons = Math.max(g.minBons, d.minBons||0);
     }
   });
 
@@ -210,7 +260,7 @@ async function gerarEscala(){
   teams.forEach(team=>{
     if(!team.conferente) return; // doca sem conferente hoje, não recebe carregadores
 
-    // garante primeiro o mínimo de carregadores bons exigido pela doca (ex: SSP15)
+    // garante primeiro o mínimo de carregadores bons exigido pelo grupo (ex: quem cobre a SSP15)
     let bonsGiven = 0;
     while(bonsGiven < team.minBons && bi < bons.length && team.carregadores.length < team.loaders){
       team.carregadores.push(bons[bi++]); bonsGiven++;
@@ -226,7 +276,7 @@ async function gerarEscala(){
     }
   });
 
-  // sobras vão para as docas ativas, por ordem de prioridade
+  // sobras vão para as equipes ativas, por ordem de prioridade
   const docasAtivas = teams.filter(t=>t.conferente);
   let ti = 0, guard = 0;
   while((bi<bons.length || ri<ruins.length) && guard < 2000 && docasAtivas.length){
@@ -261,12 +311,12 @@ async function gerarEscala(){
   // avisos
   const warnings = [];
   const semConferente = teams.filter(t=>!t.conferente);
-  if(semConferente.length){ warnings.push(`Sem conferente hoje: ${semConferente.map(t=>t.doca).join(', ')}.`); }
+  if(semConferente.length){ warnings.push(`Sem conferente hoje: ${semConferente.map(t=>t.docas.join('/')).join(', ')}.`); }
 
   const semCarregadores = teams.filter(t=>t.conferente && t.carregadores.length < t.loaders);
-  if(semCarregadores.length){ warnings.push(`Carregadores insuficientes em: ${semCarregadores.map(t=>t.doca).join(', ')}.`); }
+  if(semCarregadores.length){ warnings.push(`Carregadores insuficientes em: ${semCarregadores.map(t=>t.docas.join('/')).join(', ')}.`); }
 
-  const ssp15 = teams.find(t=>t.doca==='SSP15');
+  const ssp15 = teams.find(t=>t.docas.includes('SSP15'));
   if(ssp15 && ssp15.conferente){
     const bonsCount = ssp15.carregadores.filter(c=>c.quality==='bom').length;
     if(bonsCount < ssp15.minBons){ warnings.push(`SSP15 ficou com apenas ${bonsCount} carregador(es) reforçado(s) — precisa de pelo menos ${ssp15.minBons}.`); }
@@ -283,8 +333,10 @@ function renderTable(teams, meta){
   const wrap = document.getElementById('teams-table-wrap');
   const rows = teams.map(t=>{
     const conf = t.conferente ? t.conferente.name : '—';
+    const docaCell = t.docas.join('/');
+    const volumeCell = [...new Set(t.volumes)].join(' / ');
     const carg = t.carregadores.length ? t.carregadores.map(c=>c.name).join(', ') : (t.conferente ? '—' : '');
-    return `<tr><td class="col-doca">${t.doca}</td><td>${t.volume}</td><td class="col-conf">${conf}</td><td class="col-carg">${carg}</td></tr>`;
+    return `<tr><td class="col-doca">${docaCell}</td><td>${volumeCell}</td><td class="col-conf">${conf}</td><td class="col-carg">${carg}</td></tr>`;
   }).join('');
 
   wrap.innerHTML = `
@@ -339,8 +391,8 @@ async function confirmSave(){
       date: dateKey,
       savedAt: new Date().toISOString(),
       teams: teams.map(t=>({
-        doca: t.doca,
-        volume: t.volume,
+        docas: t.docas,
+        volumes: t.volumes,
         conferente: t.conferente ? t.conferente.name : null,
         carregadores: t.carregadores.map(c=>c.name)
       }))
@@ -377,8 +429,8 @@ async function confirmSave(){
 
 function payloadToTeams(data){
   return data.teams.map(t=>({
-    doca: t.doca,
-    volume: t.volume,
+    docas: t.docas || (t.doca ? [t.doca] : []),
+    volumes: t.volumes || (t.volume ? [t.volume] : []),
     conferente: t.conferente ? { name:t.conferente } : null,
     carregadores: (t.carregadores || []).map(n=>({ name:n }))
   }));

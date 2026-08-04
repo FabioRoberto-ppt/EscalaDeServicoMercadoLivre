@@ -13,7 +13,7 @@
   <div class="tape"></div>
 
   <header>
-    <div class="wordmark">ML</div>
+    <img src="Mercado-Livre-Logo.png" alt="Mercado Livre" class="logo">
     <div class="header-text">
       <div class="eyebrow">Doca 28 · Planejamento diário</div>
       <h1>Escala de Serviço</h1>
@@ -46,6 +46,10 @@
       <h2>Gerar escala</h2>
       <p class="hint">Cada doca já tem sua equipe definida pelo volume. A SSP15 sempre recebe reforço extra. Cada conferente pode assumir até 3 docas.</p>
       <div class="controls">
+        <div class="field">
+          <span>Conferentes hoje</span>
+          <input type="number" id="qtd-conferentes-input" min="1" value="1">
+        </div>
         <button class="btn-stamp" id="gerar-btn">Gerar escala</button>
         <button class="btn-ghost" id="save-btn">Salvar para todos verem</button>
         <button class="btn-ghost" id="print-btn" style="display:none;">Imprimir</button>
