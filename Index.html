@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Escala de Serviço — Doca 28</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="tape"></div>
+
+  <header>
+    <img src="Mercado-Livre-Logo.png" alt="Mercado Livre" class="logo">
+    <div class="header-text">
+      <div class="eyebrow">Doca 28 · Planejamento diário</div>
+      <h1>Escala de Serviço</h1>
+      <p class="sub">Marque quem está presente hoje e gere a escala. As equipes são montadas automaticamente por doca, de acordo com o volume de cada uma.</p>
+    </div>
+  </header>
+
+  <main>
+
+    <section class="panel roster-panel">
+      <div class="roster-grid">
+        <div>
+          <h2>Conferentes</h2>
+          <p class="hint">Um conferente lidera cada equipe.</p>
+          <ul class="roster-list" id="conf-list"></ul>
+        </div>
+        <div>
+          <h2>Carregadores</h2>
+          <p class="hint">Distribuídos entre as equipes.</p>
+          <ul class="roster-list" id="carg-list"></ul>
+        </div>
+      </div>
+      <div class="controls" style="margin-top:16px;">
+        <button class="btn-ghost" id="marcar-todos">Marcar todos</button>
+        <button class="btn-ghost" id="desmarcar-todos">Desmarcar todos</button>
+      </div>
+    </section>
+
+    <section class="panel gen-panel">
+      <h2>Gerar escala</h2>
+      <p class="hint">Cada doca já tem sua equipe definida pelo volume. A SSP15 sempre recebe reforço extra. Escolha livremente quantos conferentes vão atuar hoje.</p>
+      <div class="controls">
+        <div class="field">
+          <span>Conferentes hoje</span>
+          <input type="number" id="qtd-conferentes-input" min="1" value="1">
+        </div>
+        <button class="btn-stamp" id="gerar-btn">Gerar escala</button>
+        <button class="btn-ghost" id="save-btn">Salvar para todos verem</button>
+        <button class="btn-ghost" id="print-btn" style="display:none;">Imprimir</button>
+      </div>
+
+      <div id="pass-panel">
+        <input type="password" id="pass-input" placeholder="Senha">
+        <button class="btn-stamp" id="pass-confirm">Confirmar</button>
+        <button class="btn-ghost" id="pass-cancel">Cancelar</button>
+      </div>
+
+      <p class="msg" id="msg"></p>
+      <p class="msg" id="save-msg"></p>
+    </section>
+
+    <section class="panel saved-panel">
+      <h2>Escalas já salvas</h2>
+      <p class="hint">Visível para todo mundo, sem precisar de senha.</p>
+      <div class="controls">
+        <select id="saved-select"><option value="">Selecione uma data</option></select>
+        <button class="btn-ghost" id="ver-salva-btn">Ver</button>
+      </div>
+    </section>
+
+    <section class="panel" id="output-section">
+      <span class="status-tag" id="status-tag"></span>
+      <div class="teams-table-wrap" id="teams-table-wrap"></div>
+    </section>
+
+  </main>
+
+  <footer>Escala salva fica visível para todos · edições exigem senha</footer>
+
+<script src="script.js"></script>
+
+</body>
+</html>
